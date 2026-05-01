@@ -13,7 +13,7 @@ jobs:
           echo "BR2_PACKAGE_MAJESTIC=y" >> .config
           echo "BR2_PACKAGE_MAJESTIC_WEBUI=y" >> .config
           echo "BR2_PACKAGE_IPCTOOL=y" >> .config
-          make olddefconfig && make -j$(nproc)
+          make distclean && make ak3918ev300_lite_defconfig
       - uses: actions/upload-artifact@v4
         with:
           name: ak3918-full-firmware
