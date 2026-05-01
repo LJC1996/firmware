@@ -22,88 +22,78 @@ jobs:
       - name: Download and Prepare Buildroot
         run: |
           cd $GITHUB_WORKSPACE
-          # 使用更新的 Buildroot 版本（2023.02 或 2024.02）
-          wget https://github.com/buildroot/buildroot/archive/refs/tags/2024.02.tar.gz
-          tar -xzf 2024.02.tar.gz
-          mv buildroot-2024.02 buildroot
+          # 使用 Buildroot 2021.02.12（与 OpenIPC 项目更兼容）
+          wget https://github.com/buildroot/buildroot/archive/refs/tags/2021.02.12.tar.gz
+          tar -xzf 2021.02.12.tar.gz
+          mv buildroot-2021.02.12 buildroot
           echo "BUILDROOT_DIR=$GITHUB_WORKSPACE/buildroot" >> $GITHUB_ENV
 
-      - name: Fix OpenIPC BR2_EXTERNAL Structure
+      - name: Fix external.desc - Critical Fix
         run: |
           cd $GITHUB_WORKSPACE/br-ext-chip-anyka
           
-          # 正确的 external.desc 格式：只需要 "name <名称>" 一行
-          # 注意：不要有多余的空格或引号
-          echo "name openipc-ak3918" > external.desc
+          # 删除可能存在的错误格式文件
+          rm -f external.desc
           
-          # 验证内容
+          # 方法1：尝试从其他 OpenIPC 配置文件复制（如果存在）
+          if [ -f "../external.desc" ]; then
+            cp ../external.desc .
+          else
+            # 方法2：创建正确格式的文件
+            # Buildroot 要求：第一行必须是 "name <名称>"
+            # 注意：不要有任何额外字符，不要引号
+            printf "%s\n" "name openipc" > external.desc
+          fi
+          
+          # 验证文件格式
           echo "=== external.desc 内容 ==="
           cat external.desc
-          echo "========================"
+          echo "=== 文件十六进制检查 ==="
+          hexdump -C external.desc
           
-          # 同时检查是否还有其他缺失的必要文件
-          echo "检查 Config.in 文件..."
-          if [ ! -f "Config.in" ]; then
-            echo "警告: 没有找到 Config.in，可能需要创建"
-            # 创建一个基本的 Config.in
-            echo "menu \"OpenIPC External Options\"" > Config.in
-            echo "source \"\$(BR2_EXTERNAL_OPENIPC_AK3918_PATH)/package/Config.in\"" >> Config.in
-            echo "endmenu" >> Config.in
-          fi
+          # 确保没有 BOM 或隐藏字符
+          dos2unix external.desc 2>/dev/null || true
           
-          echo "检查 package 目录..."
-          if [ ! -d "package" ]; then
-            echo "警告: 没有找到 package 目录"
-            mkdir -p package
-          fi
-          
-          echo "当前目录内容:"
-          ls -la
+          # 再次验证
+          echo "=== 清理后 ==="
+          cat external.desc
 
       - name: Configure Buildroot
         run: |
           cd $BUILDROOT_DIR
           
-          # 设置 BR2_EXTERNAL 并配置
-          make BR2_EXTERNAL=$GITHUB_WORKSPACE/br-ext-chip-anyka ak3918ev300_lite_defconfig
+          # 设置 BR2_EXTERNAL
+          export BR2_EXTERNAL=$GITHUB_WORKSPACE/br-ext-chip-anyka
           
-          if [ ! -f .config ]; then
-            echo "配置失败！"
-            echo "尝试列出可用的 defconfig..."
-            make BR2_EXTERNAL=$GITHUB_WORKSPACE/br-ext-chip-anyka list-defconfigs
+          # 直接使用 defconfig 文件（绕过配置系统）
+          if [ -f "$BR2_EXTERNAL/configs/ak3918ev300_lite_defconfig" ]; then
+            cp $BR2_EXTERNAL/configs/ak3918ev300_lite_defconfig .config
+            echo "已复制 defconfig 到 .config"
+          else
+            echo "找不到 defconfig 文件！"
             exit 1
           fi
           
-          echo "基础配置成功。启用额外软件包..."
+          # 添加额外配置
           echo 'BR2_PACKAGE_MAJESTIC=y' >> .config
           echo 'BR2_PACKAGE_MAJESTIC_WEBUI=y' >> .config
           echo 'BR2_PACKAGE_IPCTOOL=y' >> .config
           
-          # 修复新配置项的依赖关系
+          # 让 Buildroot 处理配置
           make olddefconfig
+          
+          # 验证配置
+          echo "配置验证："
+          grep "BR2_PACKAGE_MAJESTIC" .config
 
       - name: Build Firmware
         run: |
           cd $BUILDROOT_DIR
+          export BR2_EXTERNAL=$GITHUB_WORKSPACE/br-ext-chip-anyka
           make -j$(nproc)
-
-      - name: Locate and Upload Firmware
-        run: |
-          echo "正在查找生成的固件文件..."
-          if [ -d "$BUILDROOT_DIR/output/images" ]; then
-            ls -la $BUILDROOT_DIR/output/images/
-            echo "固件文件列表:"
-            find $BUILDROOT_DIR/output/images -type f \( -name "*.bin" -o -name "*.squashfs" -o -name "*.img" -o -name "*.ubi" \)
-          else
-            echo "未找到 output/images 目录"
-            # 尝试在其他位置查找
-            find $BUILDROOT_DIR -name "*.bin" -o -name "*.squashfs" | head -20
-          fi
-        continue-on-error: true
 
       - uses: actions/upload-artifact@v4
         with:
-          name: ak3918-openipc-firmware
+          name: ak3918-firmware
           path: |
-            ${{ env.BUILDROOT_DIR }}/output/images/*
-            ${{ env.BUILDROOT_DIR }}/output/*.bin
+            ${{ env.BUILDROOT_DIR }}/output/images/
