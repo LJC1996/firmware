@@ -7,31 +7,60 @@ jobs:
     runs-on: ubuntu-latest
     
     steps:
+      # 关键：必须使用 --recursive 完整克隆，才能获取 br-ext-chip-anyka 目录
       - uses: actions/checkout@v4
+        with:
+          repository: OpenIPC/firmware
+          ref: master
+          fetch-depth: 1
+          submodules: recursive  # 这是最关键的修改
       
       - name: Install Dependencies
         run: |
           sudo apt update
-          sudo apt install -y build-essential libncurses5-dev
+          sudo apt install -y build-essential libncurses5-dev file bc
+          # 添加 OpenIPC 构建可能需要的其他依赖
+          sudo apt install -y wget cpio unzip rsync bc
       
-      - name: Configure and Build
+      - name: Configure for AK3918EV300
         run: |
-          # 先配置基础配置
-          make ak3918ev300_lite_defconfig
+          # 使用你原来的正确命令
+          make br-ext-chip-anyka/configs/ak3918ev300_lite_defconfig
           
-          # 添加额外配置
+          # 检查配置是否生成成功
+          if [ ! -f .config ]; then
+            echo "错误: .config 文件未生成！"
+            exit 1
+          fi
+          
+          echo "配置已生成。启用额外包 (Majestic, IPCTool)..."
+          # 这些包在配置文件中可能已启用，这里确保它们被设置
           echo "BR2_PACKAGE_MAJESTIC=y" >> .config
           echo "BR2_PACKAGE_MAJESTIC_WEBUI=y" >> .config
           echo "BR2_PACKAGE_IPCTOOL=y" >> .config
           
-          # 重新配置以解决依赖
+          # 将新选项转化为正确的依赖关系
           make olddefconfig
-          
-          # 执行构建
+      
+      - name: Build Firmware
+        run: |
+          # 使用所有CPU核心编译，但设置一个环境变量以防构建脚本需要
           make -j$(nproc)
       
-      - name: Upload Firmware
+      - name: List build artifacts
+        run: |
+          echo "查找生成的镜像文件..."
+          find output/images -type f -name "*.bin" -o -name "*.squashfs" -o -name "*.cpio*" -o -name "*.ubi"
+          ls -lh output/images/ || echo "output/images/ 目录不存在或为空"
+      
+      - name: Upload Firmware Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: ak3918-full-firmware
-          path: output/images/*.bin
+          name: openipc-ak3918-full-firmware
+          # 上传更广泛的文件类型，以防 .bin 文件不存在
+          path: |
+            output/images/*.bin
+            output/images/*.squashfs
+            output/images/*.cpio*
+            output/images/rootfs.*
+            output/images/uImage*
