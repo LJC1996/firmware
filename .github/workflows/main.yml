@@ -1,30 +1,37 @@
-name: Build AK3918EV300
+name: Build AK3918EV300 Full Firmware
+
 on: workflow_dispatch
 
 jobs:
   build:
     runs-on: ubuntu-latest
+    
     steps:
       - uses: actions/checkout@v4
-
-      - name: Download prebuilt firmware
+      
+      - name: Install Dependencies
         run: |
-          mkdir -p target
-          cd target
-          wget -nv https://github.com/openipc/firmware/releases/download/latest/u-boot-ak3918ev300-nor.bin
-          wget -nv https://github.com/openipc/firmware/releases/download/latest/openipc.ak3918ev300-nor-lite.tgz
-          tar zxf openipc.ak3918ev300-nor-lite.tgz
-
-      - name: Create full firmware image
+          sudo apt update
+          sudo apt install -y build-essential libncurses5-dev
+      
+      - name: Configure and Build
         run: |
-          cd target
-          dd if=/dev/zero bs=1K count=5000 | tr '\000' '\377' > openipc-ak3918ev300-full.bin
-          dd if=u-boot-ak3918ev300-nor.bin of=openipc-ak3918ev300-full.bin bs=1K seek=0 conv=notrunc
-          dd if=uImage.ak3918ev300 of=openipc-ak3918ev300-full.bin bs=1K seek=320 conv=notrunc
-          dd if=rootfs.squashfs.ak3918ev300 of=openipc-ak3918ev300-full.bin bs=1K seek=2368 conv=notrunc
-
-      - name: Upload firmware
+          # 先配置基础配置
+          make ak3918ev300_lite_defconfig
+          
+          # 添加额外配置
+          echo "BR2_PACKAGE_MAJESTIC=y" >> .config
+          echo "BR2_PACKAGE_MAJESTIC_WEBUI=y" >> .config
+          echo "BR2_PACKAGE_IPCTOOL=y" >> .config
+          
+          # 重新配置以解决依赖
+          make olddefconfig
+          
+          # 执行构建
+          make -j$(nproc)
+      
+      - name: Upload Firmware
         uses: actions/upload-artifact@v4
         with:
-          name: ak3918ev300-firmware
-          path: target/*.bin
+          name: ak3918-full-firmware
+          path: output/images/*.bin
