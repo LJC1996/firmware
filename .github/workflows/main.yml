@@ -7,60 +7,80 @@ jobs:
     runs-on: ubuntu-latest
     
     steps:
-      # 关键：必须使用 --recursive 完整克隆，才能获取 br-ext-chip-anyka 目录
       - uses: actions/checkout@v4
         with:
           repository: OpenIPC/firmware
           ref: master
           fetch-depth: 1
-          submodules: recursive  # 这是最关键的修改
+          submodules: recursive
       
       - name: Install Dependencies
         run: |
           sudo apt update
-          sudo apt install -y build-essential libncurses5-dev file bc
-          # 添加 OpenIPC 构建可能需要的其他依赖
-          sudo apt install -y wget cpio unzip rsync bc
+          sudo apt install -y build-essential libncurses5-dev file bc cpio unzip rsync wget
       
-      - name: Configure for AK3918EV300
+      - name: Setup BR2_EXTERNAL and Configure
         run: |
-          # 使用你原来的正确命令
-          make br-ext-chip-anyka/configs/ak3918ev300_lite_defconfig
+          # 关键：OpenIPC 需要设置 BR2_EXTERNAL 环境变量
+          # 方法1：使用 OpenIPC 的构建脚本
+          if [ -f "setup.sh" ]; then
+            echo "找到 setup.sh，使用官方构建脚本"
+            source setup.sh
+          fi
           
-          # 检查配置是否生成成功
+          # 方法2：手动设置 BR2_EXTERNAL 并运行 make
+          # BR2_EXTERNAL 指向包含 br-ext-chip-anyka 的父目录
+          export BR2_EXTERNAL=$(pwd)
+          echo "BR2_EXTERNAL 设置为: $BR2_EXTERNAL"
+          
+          # 现在运行配置命令（注意：不需要指定完整路径到configs）
+          # 正确的命令格式：make <扩展名>/configs/<配置名>
+          make BR2_EXTERNAL=$(pwd) ak3918ev300_lite_defconfig
+          
+          # 如果上面不行，尝试这个格式
           if [ ! -f .config ]; then
-            echo "错误: .config 文件未生成！"
+            echo "尝试备用配置方法..."
+            make BR2_EXTERNAL=$(pwd) br-ext-chip-anyka/configs/ak3918ev300_lite_defconfig
+          fi
+          
+          # 检查配置是否生成
+          if [ ! -f .config ]; then
+            echo "=== 调试信息 ==="
+            echo "当前目录: $(pwd)"
+            echo "br-ext-chip-anyka 目录存在? $([ -d br-ext-chip-anyka ] && echo '是' || echo '否')"
+            echo "可用的 defconfig:"
+            make BR2_EXTERNAL=$(pwd) list-defconfigs 2>/dev/null | grep -i ak3918 || echo "没有找到"
+            echo "文件列表:"
+            ls -la configs/ 2>/dev/null || echo "无 configs 目录"
+            ls -la br-ext-chip-anyka/configs/ 2>/dev/null || echo "无 br-ext-chip-anyka/configs 目录"
             exit 1
           fi
           
-          echo "配置已生成。启用额外包 (Majestic, IPCTool)..."
-          # 这些包在配置文件中可能已启用，这里确保它们被设置
+          echo "配置文件生成成功，启用额外包..."
           echo "BR2_PACKAGE_MAJESTIC=y" >> .config
           echo "BR2_PACKAGE_MAJESTIC_WEBUI=y" >> .config
           echo "BR2_PACKAGE_IPCTOOL=y" >> .config
           
-          # 将新选项转化为正确的依赖关系
           make olddefconfig
       
       - name: Build Firmware
         run: |
-          # 使用所有CPU核心编译，但设置一个环境变量以防构建脚本需要
+          # 构建时需要保持 BR2_EXTERNAL 环境变量
+          export BR2_EXTERNAL=$(pwd)
           make -j$(nproc)
       
-      - name: List build artifacts
+      - name: List and Upload Artifacts
         run: |
-          echo "查找生成的镜像文件..."
-          find output/images -type f -name "*.bin" -o -name "*.squashfs" -o -name "*.cpio*" -o -name "*.ubi"
-          ls -lh output/images/ || echo "output/images/ 目录不存在或为空"
+          echo "查找生成的固件..."
+          find output/images -type f -name "*.bin" -o -name "*.squashfs" -o -name "*.cpio*" -o -name "*.img" -o -name "*.ubi"
+          ls -la output/images/ || echo "output/images 目录不存在"
       
-      - name: Upload Firmware Artifacts
-        uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v4
         with:
-          name: openipc-ak3918-full-firmware
-          # 上传更广泛的文件类型，以防 .bin 文件不存在
+          name: openipc-ak3918-firmware
           path: |
             output/images/*.bin
             output/images/*.squashfs
-            output/images/*.cpio*
-            output/images/rootfs.*
+            output/images/*.img
             output/images/uImage*
+            output/images/rootfs.*
