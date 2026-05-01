@@ -5,7 +5,7 @@ on: workflow_dispatch
 jobs:
   build:
     runs-on: ubuntu-latest
-    
+
     steps:
       - uses: actions/checkout@v4
         with:
@@ -13,29 +13,74 @@ jobs:
           ref: master
           fetch-depth: 1
           submodules: recursive
-      
-      - name: Build with OpenIPC Docker
+
+      - name: Install Dependencies
         run: |
-          # 使用 OpenIPC 官方构建镜像
-          docker run --rm \
-            -v ${{ github.workspace }}:/home/firmware \
-            -w /home/firmware \
-            openipc/buildroot-env:latest \
-            bash -c "
-              # 在 Docker 容器内构建
-              make br-ext-chip-anyka/configs/ak3918ev300_lite_defconfig
-              
-              # 启用额外功能
-              echo 'BR2_PACKAGE_MAJESTIC=y' >> .config
-              echo 'BR2_PACKAGE_MAJESTIC_WEBUI=y' >> .config
-              echo 'BR2_PACKAGE_IPCTOOL=y' >> .config
-              
-              make olddefconfig
-              make -j\$(nproc)
-            "
-      
-      - name: Upload Artifacts
-        uses: actions/upload-artifact@v4
+          sudo apt update
+          sudo apt install -y build-essential libncurses5-dev file bc cpio unzip rsync wget
+
+      - name: Download and Prepare Buildroot
+        run: |
+          cd $GITHUB_WORKSPACE
+          # 下载 Buildroot (尝试一个与 OpenIPC 项目更兼容的版本)
+          wget https://github.com/buildroot/buildroot/archive/refs/tags/2021.02.12.tar.gz
+          tar -xzf 2021.02.12.tar.gz
+          mv buildroot-2021.02.12 buildroot
+          echo "BUILDROOT_DIR=$GITHUB_WORKSPACE/buildroot" >> $GITHUB_ENV
+
+      - name: Fix OpenIPC BR2_EXTERNAL Structure
+        run: |
+          # 进入 br-ext-chip-anyka 目录
+          cd $GITHUB_WORKSPACE/br-ext-chip-anyka
+          
+          # 创建缺失的 external.desc 文件
+          # 文件内容格式: name <自定义名称>
+          echo "name OPENIPC_AK3918" > external.desc
+          
+          # 验证文件是否创建成功
+          echo "已创建 external.desc，内容如下："
+          cat external.desc
+          
+          echo "br-ext-chip-anyka 目录现在包含:"
+          ls -la
+
+      - name: Configure Buildroot
+        run: |
+          cd $BUILDROOT_DIR
+          
+          # 设置 BR2_EXTERNAL 并配置
+          make BR2_EXTERNAL=$GITHUB_WORKSPACE/br-ext-chip-anyka ak3918ev300_lite_defconfig
+          
+          # 检查配置是否成功
+          if [ ! -f .config ]; then
+            echo "配置失败！"
+            exit 1
+          fi
+          
+          echo "基础配置成功。启用额外软件包..."
+          echo 'BR2_PACKAGE_MAJESTIC=y' >> .config
+          echo 'BR2_PACKAGE_MAJESTIC_WEBUI=y' >> .config
+          echo 'BR2_PACKAGE_IPCTOOL=y' >> .config
+          
+          # 修复新配置项的依赖关系
+          make olddefconfig
+
+      - name: Build Firmware
+        run: |
+          cd $BUILDROOT_DIR
+          make -j$(nproc)
+
+      - name: Locate and Upload Firmware
+        run: |
+          echo "正在查找生成的固件文件..."
+          find $BUILDROOT_DIR/output/images -type f
+          ls -la $BUILDROOT_DIR/output/images/ || echo "未找到 images 目录"
+        continue-on-error: true
+
+      - uses: actions/upload-artifact@v4
         with:
-          name: ak3918-firmware
-          path: output/images/
+          name: ak3918-openipc-firmware
+          path: |
+            ${{ env.BUILDROOT_DIR }}/output/images/*.bin
+            ${{ env.BUILDROOT_DIR }}/output/images/*.squashfs
+            ${{ env.BUILDROOT_DIR }}/output/images/*.img
