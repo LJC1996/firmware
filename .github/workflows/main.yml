@@ -1,0 +1,20 @@
+name: Build AK3918EV300 Full Firmware
+on: workflow_dispatch
+jobs:
+  build:
+    runs-on: ubuntu-20.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Dependencies
+        run: sudo apt update && sudo apt install -y build-essential libncurses5-dev
+      - name: Configure and Build
+        run: |
+          make ak3918ev300_defconfig
+          echo "BR2_PACKAGE_MAJESTIC=y" >> .config
+          echo "BR2_PACKAGE_MAJESTIC_WEBUI=y" >> .config
+          echo "BR2_PACKAGE_IPCTOOL=y" >> .config
+          make olddefconfig && make -j$(nproc)
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ak3918-full-firmware
+          path: output/images/*.bin
