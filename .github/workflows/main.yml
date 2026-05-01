@@ -14,88 +14,28 @@ jobs:
           fetch-depth: 1
           submodules: recursive
       
-      - name: Install Dependencies
+      - name: Build with OpenIPC Docker
         run: |
-          sudo apt update
-          sudo apt install -y build-essential libncurses5-dev file bc cpio unzip rsync wget
+          # 使用 OpenIPC 官方构建镜像
+          docker run --rm \
+            -v ${{ github.workspace }}:/home/firmware \
+            -w /home/firmware \
+            openipc/buildroot-env:latest \
+            bash -c "
+              # 在 Docker 容器内构建
+              make br-ext-chip-anyka/configs/ak3918ev300_lite_defconfig
+              
+              # 启用额外功能
+              echo 'BR2_PACKAGE_MAJESTIC=y' >> .config
+              echo 'BR2_PACKAGE_MAJESTIC_WEBUI=y' >> .config
+              echo 'BR2_PACKAGE_IPCTOOL=y' >> .config
+              
+              make olddefconfig
+              make -j\$(nproc)
+            "
       
-      - name: Download Buildroot
-        run: |
-          # OpenIPC 通常使用特定版本的 Buildroot
-          # 从 OpenIPC 的配置中获取 Buildroot 版本
-          cd $GITHUB_WORKSPACE
-          
-          # 方法1：检查是否有 Buildroot 子模块
-          if [ -d "buildroot" ] && [ -f "buildroot/Makefile" ]; then
-            echo "使用已有的 Buildroot 子模块"
-            cd buildroot
-          else
-            echo "下载 Buildroot"
-            # 下载 OpenIPC 使用的 Buildroot 版本（通常是 2021.02 或更新）
-            wget https://github.com/buildroot/buildroot/archive/refs/tags/2021.02.12.tar.gz
-            tar -xzf 2021.02.12.tar.gz
-            mv buildroot-2021.02.12 buildroot
-            cd buildroot
-          fi
-          
-          # 记录 Buildroot 路径
-          echo "BUILDROOT_DIR=$PWD" >> $GITHUB_ENV
-          echo "Buildroot 位于: $PWD"
-      
-      - name: Configure Buildroot with OpenIPC External
-        run: |
-          cd $BUILDROOT_DIR
-          
-          # 设置 BR2_EXTERNAL 指向 OpenIPC 的扩展目录
-          export BR2_EXTERNAL=$GITHUB_WORKSPACE/br-ext-chip-anyka
-          echo "BR2_EXTERNAL=$BR2_EXTERNAL" >> $GITHUB_ENV
-          
-          # 现在使用 OpenIPC 提供的 defconfig
-          # 注意：defconfig 文件名就是配置名
-          make BR2_EXTERNAL=$BR2_EXTERNAL ak3918ev300_lite_defconfig
-          
-          # 检查是否生成配置
-          if [ ! -f .config ]; then
-            echo "配置生成失败！"
-            echo "可用的 defconfig:"
-            make BR2_EXTERNAL=$BR2_EXTERNAL list-defconfigs | grep ak3918
-            exit 1
-          fi
-          
-          echo "配置成功，启用额外包..."
-          echo "BR2_PACKAGE_MAJESTIC=y" >> .config
-          echo "BR2_PACKAGE_MAJESTIC_WEBUI=y" >> .config
-          echo "BR2_PACKAGE_IPCTOOL=y" >> .config
-          
-          # 修复依赖关系
-          make olddefconfig
-      
-      - name: Build Firmware
-        run: |
-          cd $BUILDROOT_DIR
-          make -j$(nproc)
-          
-          # 将生成的镜像复制到工作空间
-          mkdir -p $GITHUB_WORKSPACE/output
-          cp -r output/images $GITHUB_WORKSPACE/output/ || echo "没有找到 images 目录"
-      
-      - name: List and Upload Artifacts
-        run: |
-          echo "查找生成的固件："
-          find $BUILDROOT_DIR/output -name "*.bin" -o -name "*.squashfs" -o -name "*.img" -o -name "*.ubi" 2>/dev/null
-          ls -la $GITHUB_WORKSPACE/output/images/ || echo "输出目录为空"
-          
-          # 如果 images 目录存在，列出所有文件
-          if [ -d "$BUILDROOT_DIR/output/images" ]; then
-            ls -lh $BUILDROOT_DIR/output/images/
-          fi
-      
-      - uses: actions/upload-artifact@v4
+      - name: Upload Artifacts
+        uses: actions/upload-artifact@v4
         with:
-          name: ak3918-openipc-firmware
-          path: |
-            ${{ env.BUILDROOT_DIR }}/output/images/*.bin
-            ${{ env.BUILDROOT_DIR }}/output/images/*.squashfs
-            ${{ env.BUILDROOT_DIR }}/output/images/*.img
-            ${{ env.BUILDROOT_DIR }}/output/images/uImage*
-            ${{ env.BUILDROOT_DIR }}/output/images/rootfs.*
+          name: ak3918-firmware
+          path: output/images/
