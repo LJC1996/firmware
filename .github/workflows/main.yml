@@ -1,4 +1,4 @@
-name: Build AK3918EV300 Full Featured Firmware
+name: Build AK3918EV300 with ONVIF & opkg
 
 on: workflow_dispatch
 
@@ -7,59 +7,93 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v4
+      - name: Install Dependencies
+        run: |
+          sudo apt update
+          sudo apt install -y \
+            build-essential libncurses5-dev file bc cpio unzip rsync wget \
+            git sed make binutils gcc g++ bash patch gzip bzip2 perl tar \
+            findutils awk python3
+
+      - name: Clone OpenIPC Firmware
+        uses: actions/checkout@v4
         with:
           repository: OpenIPC/firmware
           ref: master
           fetch-depth: 1
           submodules: recursive
 
-      - name: Install Dependencies
-        run: |
-          sudo apt update
-          sudo apt install -y build-essential libncurses5-dev file bc cpio unzip rsync wget
-
-      - name: Download Buildroot 2021.02.12
+      - name: Enable ONVIF and opkg in Config
         run: |
           cd $GITHUB_WORKSPACE
-          wget https://github.com/buildroot/buildroot/archive/refs/tags/2021.02.12.tar.gz
-          tar -xzf 2021.02.12.tar.gz
-          mv buildroot-2021.02.12 buildroot
+          
+          # 方法1：修改 defconfig 文件（永久启用）
+          DEFCONFIG="br-ext-chip-anyka/configs/ak3918ev300_lite_defconfig"
+          
+          # 检查并添加 ONVIF 相关配置
+          if ! grep -q "BR2_PACKAGE_ONVIF" $DEFCONFIG; then
+            echo '# ONVIF Support' >> $DEFCONFIG
+            echo 'BR2_PACKAGE_ONVIF=y' >> $DEFCONFIG
+            echo 'BR2_PACKAGE_LIVE555=y' >> $DEFCONFIG
+            echo 'BR2_PACKAGE_ONVIF_SERVER=y' >> $DEFCONFIG
+          fi
+          
+          # 检查并添加 opkg 配置
+          if ! grep -q "BR2_PACKAGE_OPKG" $DEFCONFIG; then
+            echo '# opkg Package Manager' >> $DEFCONFIG
+            echo 'BR2_PACKAGE_OPKG=y' >> $DEFCONFIG
+            echo 'BR2_PACKAGE_OPKG_LIBOPKG=y' >> $DEFCONFIG
+          fi
+          
+          # 确保 Majestic 和 WebUI 启用
+          sed -i 's/# BR2_PACKAGE_MAJESTIC is not set/BR2_PACKAGE_MAJESTIC=y/' $DEFCONFIG
+          sed -i 's/# BR2_PACKAGE_MAJESTIC_WEBUI is not set/BR2_PACKAGE_MAJESTIC_WEBUI=y/' $DEFCONFIG
+          
+          echo "配置文件已修改，ONVIF 和 opkg 已启用"
+          
+          # 显示修改后的配置
+          echo "=== 启用的关键功能 ==="
+          grep -E "ONVIF|OPKG|MAJESTIC" $DEFCONFIG
 
-      - name: Merge OpenIPC into Buildroot
+      - name: Build Firmware
         run: |
           cd $GITHUB_WORKSPACE
-          cp -r br-ext-chip-anyka/configs/* buildroot/configs/
-          cp -r br-ext-chip-anyka/package/* buildroot/package/ 2>/dev/null || true
-          cp -r br-ext-chip-anyka/board/* buildroot/board/ 2>/dev/null || true
-          echo "已合并 OpenIPC 配置"
+          chmod +x building.sh
+          ./building.sh ak3918ev300_lite
 
-      - name: Configure and Build Full Firmware
+      - name: Verify ONVIF and opkg in Build Output
         run: |
-          cd $GITHUB_WORKSPACE/buildroot
+          echo "=== 验证固件内容 ==="
           
-          # 使用 defconfig
-          make ak3918ev300_lite_defconfig
+          # 查找生成的 rootfs 文件
+          ROOTFS=$(find output/images -name "*.squashfs" -o -name "rootfs.*" | head -1)
           
-          # 关键：手动设置工具链 URL 变量
-          echo '# 手动修复工具链 URL' >> .config
-          echo 'OPENIPC_TOOLCHAIN="toolchain-2023-01-29"' >> .config
-          echo 'BR2_TOOLCHAIN_EXTERNAL_URL="https://github.com/openipc/firmware/releases/download/$(OPENIPC_TOOLCHAIN).tgz"' >> .config
-          
-          # 启用所有需要的功能
-          echo 'BR2_PACKAGE_MAJESTIC=y' >> .config
-          echo 'BR2_PACKAGE_MAJESTIC_WEBUI=y' >> .config
-          echo 'BR2_PACKAGE_IPCTOOL=y' >> .config
-          echo 'BR2_PACKAGE_OPKG=y' >> .config
-          
-          # 修复依赖
-          make olddefconfig
-          
-          # 编译
-          make -j$(nproc)
+          if [ -n "$ROOTFS" ] && command -v unsquashfs &> /dev/null; then
+            echo "检查 rootfs 中的 ONVIF 和 opkg..."
+            mkdir -p /tmp/rootfs
+            unsquashfs -d /tmp/rootfs $ROOTFS 2>/dev/null || true
+            
+            # 检查 ONVIF 相关文件
+            if find /tmp/rootfs -name "*onvif*" 2>/dev/null | grep -q .; then
+              echo "✓ ONVIF 文件存在"
+            else
+              echo "⚠ ONVIF 文件未找到"
+            fi
+            
+            # 检查 opkg
+            if [ -f "/tmp/rootfs/usr/bin/opkg" ] || [ -f "/tmp/rootfs/bin/opkg" ]; then
+              echo "✓ opkg 已安装"
+            else
+              echo "⚠ opkg 未找到"
+            fi
+          fi
 
-      - uses: actions/upload-artifact@v4
+      - name: Upload Firmware
+        uses: actions/upload-artifact@v4
         with:
-          name: ak3918-full-firmware
+          name: ak3918-onvif-opkg-firmware
           path: |
-            ${{ github.workspace }}/buildroot/output/images/
+            output/images/*.bin
+            output/images/*.squashfs
+            output/images/*.img
+            output/images/*.ubi
