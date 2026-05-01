@@ -12,6 +12,7 @@ jobs:
       - name: Configure and Build
         run: |
           # 第一步：加载默认配置
+          export SAMD=1
           make br-ext-chip-anyka/configs/ak3918ev300_lite_defconfig
           
           # 第二步：添加你需要的功能包
