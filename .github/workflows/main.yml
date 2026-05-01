@@ -1,33 +1,30 @@
-name: Build AK3918EV300 Full Firmware
+name: Build AK3918EV300
 on: workflow_dispatch
+
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install Dependencies
-        run: sudo apt update && sudo apt install -y build-essential libncurses5-dev
-
-      - name: Configure and Build
+      - name: Download prebuilt firmware
         run: |
-          # 第一步：加载默认配置
-          export SAMD=1
-          export BOARD=ak3918ev300_lite
-          make br-ext-chip-anyka/configs/ak3918ev300_lite_defconfig image
-          
-          # 第二步：添加你需要的功能包
-          echo "BR2_PACKAGE_MAJESTIC=y" >> .config
-          echo "BR2_PACKAGE_MAJESTIC_WEBUI=y" >> .config
-          echo "BR2_PACKAGE_IPCTOOL=y" >> .config
-          
-          # 第三步：重新应用配置（关键！）
-          make defconfig
-          
-          # 第四步：开始编译 + 自动打包
-          make -j$(nproc)
+          mkdir -p target
+          cd target
+          wget -nv https://github.com/openipc/firmware/releases/download/latest/u-boot-ak3918ev300-nor.bin
+          wget -nv https://github.com/openipc/firmware/releases/download/latest/openipc.ak3918ev300-nor-lite.tgz
+          tar zxf openipc.ak3918ev300-nor-lite.tgz
 
-      - uses: actions/upload-artifact@v4
+      - name: Create full firmware image
+        run: |
+          cd target
+          dd if=/dev/zero bs=1K count=5000 | tr '\000' '\377' > openipc-ak3918ev300-full.bin
+          dd if=u-boot-ak3918ev300-nor.bin of=openipc-ak3918ev300-full.bin bs=1K seek=0 conv=notrunc
+          dd if=uImage.ak3918ev300 of=openipc-ak3918ev300-full.bin bs=1K seek=320 conv=notrunc
+          dd if=rootfs.squashfs.ak3918ev300 of=openipc-ak3918ev300-full.bin bs=1K seek=2368 conv=notrunc
+
+      - name: Upload firmware
+        uses: actions/upload-artifact@v4
         with:
-          name: ak3918-full-firmware
-          path: output/images/*
+          name: ak3918ev300-firmware
+          path: target/*.bin
