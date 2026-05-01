@@ -26,7 +26,7 @@ jobs:
           tar -xzf 2021.02.12.tar.gz
           mv buildroot-2021.02.12 buildroot
 
-      - name: Merge OpenIPC into Buildroot (Direct Method)
+      - name: Merge OpenIPC into Buildroot
         run: |
           cd $GITHUB_WORKSPACE
           cp -r br-ext-chip-anyka/configs/* buildroot/configs/
@@ -38,21 +38,24 @@ jobs:
         run: |
           cd $GITHUB_WORKSPACE/buildroot
           
-          # 使用标准 Buildroot 配置命令
+          # 使用 defconfig
           make ak3918ev300_lite_defconfig
           
-          # 关键：手动开启所有需要的功能，使其成为“完整版”
+          # 关键：手动设置工具链 URL 变量
+          echo '# 手动修复工具链 URL' >> .config
+          echo 'OPENIPC_TOOLCHAIN="toolchain-2023-01-29"' >> .config
+          echo 'BR2_TOOLCHAIN_EXTERNAL_URL="https://github.com/openipc/firmware/releases/download/$(OPENIPC_TOOLCHAIN).tgz"' >> .config
+          
+          # 启用所有需要的功能
           echo 'BR2_PACKAGE_MAJESTIC=y' >> .config
           echo 'BR2_PACKAGE_MAJESTIC_WEBUI=y' >> .config
           echo 'BR2_PACKAGE_IPCTOOL=y' >> .config
-          echo 'BR2_PACKAGE_ONVIF=y' >> .config          # 尝试开启 ONVIF
-          echo 'BR2_PACKAGE_OPKG=y' >> .config           # 尝试开启 opkg
-          echo 'BR2_PACKAGE_OPENIPC_ULTIMATE=y' >> .config # 尝试开启所有 ultimate 包
+          echo 'BR2_PACKAGE_OPKG=y' >> .config
           
-          # 修复依赖关系
+          # 修复依赖
           make olddefconfig
           
-          # 开始编译
+          # 编译
           make -j$(nproc)
 
       - uses: actions/upload-artifact@v4
