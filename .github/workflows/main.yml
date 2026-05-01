@@ -20,7 +20,7 @@ jobs:
           echo "BR2_PACKAGE_IPCTOOL=y" >> .config
           
           # 第三步：重新应用配置（关键！）
-          make olddefconfig
+          make defconfig
           
           # 第四步：开始编译 + 自动打包
           make -j$(nproc)
