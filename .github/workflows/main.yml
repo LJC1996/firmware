@@ -9,7 +9,7 @@ jobs:
         run: sudo apt update && sudo apt install -y build-essential libncurses5-dev
       - name: Configure and Build
         run: |
-          make ak3918ev300_defconfig
+          make ak3918ev300_lite_defconfig
           echo "BR2_PACKAGE_MAJESTIC=y" >> .config
           echo "BR2_PACKAGE_MAJESTIC_WEBUI=y" >> .config
           echo "BR2_PACKAGE_IPCTOOL=y" >> .config
