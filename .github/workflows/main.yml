@@ -1,4 +1,4 @@
-name: Build AK3918EV300 Full Firmware
+name: Build AK3918EV300 - Direct Method
 
 on: workflow_dispatch
 
@@ -19,81 +19,41 @@ jobs:
           sudo apt update
           sudo apt install -y build-essential libncurses5-dev file bc cpio unzip rsync wget
 
-      - name: Download and Prepare Buildroot
+      - name: Download Buildroot
         run: |
           cd $GITHUB_WORKSPACE
-          # 使用 Buildroot 2021.02.12（与 OpenIPC 项目更兼容）
           wget https://github.com/buildroot/buildroot/archive/refs/tags/2021.02.12.tar.gz
           tar -xzf 2021.02.12.tar.gz
           mv buildroot-2021.02.12 buildroot
-          echo "BUILDROOT_DIR=$GITHUB_WORKSPACE/buildroot" >> $GITHUB_ENV
 
-      - name: Fix external.desc - Critical Fix
+      - name: Merge OpenIPC into Buildroot
         run: |
-          cd $GITHUB_WORKSPACE/br-ext-chip-anyka
+          cd $GITHUB_WORKSPACE
           
-          # 删除可能存在的错误格式文件
-          rm -f external.desc
+          # 直接将 OpenIPC 的扩展合并到 Buildroot 中
+          cp -r br-ext-chip-anyka/configs/* buildroot/configs/
+          cp -r br-ext-chip-anyka/package/* buildroot/package/ 2>/dev/null || true
+          cp -r br-ext-chip-anyka/board/* buildroot/board/ 2>/dev/null || true
           
-          # 方法1：尝试从其他 OpenIPC 配置文件复制（如果存在）
-          if [ -f "../external.desc" ]; then
-            cp ../external.desc .
-          else
-            # 方法2：创建正确格式的文件
-            # Buildroot 要求：第一行必须是 "name <名称>"
-            # 注意：不要有任何额外字符，不要引号
-            printf "%s\n" "name openipc" > external.desc
-          fi
-          
-          # 验证文件格式
-          echo "=== external.desc 内容 ==="
-          cat external.desc
-          echo "=== 文件十六进制检查 ==="
-          hexdump -C external.desc
-          
-          # 确保没有 BOM 或隐藏字符
-          dos2unix external.desc 2>/dev/null || true
-          
-          # 再次验证
-          echo "=== 清理后 ==="
-          cat external.desc
+          echo "已合并 OpenIPC 配置到 Buildroot"
 
-      - name: Configure Buildroot
+      - name: Configure and Build
         run: |
-          cd $BUILDROOT_DIR
+          cd $GITHUB_WORKSPACE/buildroot
           
-          # 设置 BR2_EXTERNAL
-          export BR2_EXTERNAL=$GITHUB_WORKSPACE/br-ext-chip-anyka
+          # 使用标准 Buildroot 配置
+          make ak3918ev300_lite_defconfig
           
-          # 直接使用 defconfig 文件（绕过配置系统）
-          if [ -f "$BR2_EXTERNAL/configs/ak3918ev300_lite_defconfig" ]; then
-            cp $BR2_EXTERNAL/configs/ak3918ev300_lite_defconfig .config
-            echo "已复制 defconfig 到 .config"
-          else
-            echo "找不到 defconfig 文件！"
-            exit 1
-          fi
-          
-          # 添加额外配置
+          # 添加额外包
           echo 'BR2_PACKAGE_MAJESTIC=y' >> .config
           echo 'BR2_PACKAGE_MAJESTIC_WEBUI=y' >> .config
           echo 'BR2_PACKAGE_IPCTOOL=y' >> .config
           
-          # 让 Buildroot 处理配置
           make olddefconfig
-          
-          # 验证配置
-          echo "配置验证："
-          grep "BR2_PACKAGE_MAJESTIC" .config
-
-      - name: Build Firmware
-        run: |
-          cd $BUILDROOT_DIR
-          export BR2_EXTERNAL=$GITHUB_WORKSPACE/br-ext-chip-anyka
           make -j$(nproc)
 
       - uses: actions/upload-artifact@v4
         with:
           name: ak3918-firmware
           path: |
-            ${{ env.BUILDROOT_DIR }}/output/images/
+            ${{ github.workspace }}/buildroot/output/images/
