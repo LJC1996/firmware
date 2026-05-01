@@ -5,17 +5,27 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
       - name: Install Dependencies
         run: sudo apt update && sudo apt install -y build-essential libncurses5-dev
+
       - name: Configure and Build
         run: |
+          # 第一步：加载默认配置
           make br-ext-chip-anyka/configs/ak3918ev300_lite_defconfig
+          
+          # 第二步：添加你需要的功能包
           echo "BR2_PACKAGE_MAJESTIC=y" >> .config
           echo "BR2_PACKAGE_MAJESTIC_WEBUI=y" >> .config
           echo "BR2_PACKAGE_IPCTOOL=y" >> .config
-          make distclean 
-          make br-ext-chip-anyka/configs/ak3918ev300_lite_defconfig package
+          
+          # 第三步：重新应用配置（关键！）
+          make olddefconfig
+          
+          # 第四步：开始编译 + 自动打包
+          make -j$(nproc)
+
       - uses: actions/upload-artifact@v4
         with:
           name: ak3918-full-firmware
-          path: output/images/*.bin
+          path: output/images/*
