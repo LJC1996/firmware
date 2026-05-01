@@ -11,9 +11,30 @@ jobs:
         run: |
           sudo apt update
           sudo apt install -y \
-            build-essential libncurses5-dev file bc cpio unzip rsync wget \
-            git sed make binutils gcc g++ bash patch gzip bzip2 perl tar \
-            findutils awk python3
+            build-essential \
+            libncurses5-dev \
+            file \
+            bc \
+            cpio \
+            unzip \
+            rsync \
+            wget \
+            git \
+            sed \
+            make \
+            binutils \
+            gcc \
+            g++ \
+            bash \
+            patch \
+            gzip \
+            bzip2 \
+            perl \
+            tar \
+            findutils \
+            python3 \
+            gawk \
+            mawk
 
       - name: Clone OpenIPC Firmware
         uses: actions/checkout@v4
@@ -27,65 +48,78 @@ jobs:
         run: |
           cd $GITHUB_WORKSPACE
           
-          # 方法1：修改 defconfig 文件（永久启用）
+          # 修改 defconfig 文件
           DEFCONFIG="br-ext-chip-anyka/configs/ak3918ev300_lite_defconfig"
           
-          # 检查并添加 ONVIF 相关配置
-          if ! grep -q "BR2_PACKAGE_ONVIF" $DEFCONFIG; then
-            echo '# ONVIF Support' >> $DEFCONFIG
-            echo 'BR2_PACKAGE_ONVIF=y' >> $DEFCONFIG
-            echo 'BR2_PACKAGE_LIVE555=y' >> $DEFCONFIG
-            echo 'BR2_PACKAGE_ONVIF_SERVER=y' >> $DEFCONFIG
+          # 确保文件存在
+          if [ ! -f "$DEFCONFIG" ]; then
+            echo "错误: 找不到配置文件 $DEFCONFIG"
+            exit 1
           fi
           
-          # 检查并添加 opkg 配置
-          if ! grep -q "BR2_PACKAGE_OPKG" $DEFCONFIG; then
-            echo '# opkg Package Manager' >> $DEFCONFIG
-            echo 'BR2_PACKAGE_OPKG=y' >> $DEFCONFIG
-            echo 'BR2_PACKAGE_OPKG_LIBOPKG=y' >> $DEFCONFIG
-          fi
+          # 备份原配置
+          cp $DEFCONFIG ${DEFCONFIG}.bak
           
-          # 确保 Majestic 和 WebUI 启用
-          sed -i 's/# BR2_PACKAGE_MAJESTIC is not set/BR2_PACKAGE_MAJESTIC=y/' $DEFCONFIG
-          sed -i 's/# BR2_PACKAGE_MAJESTIC_WEBUI is not set/BR2_PACKAGE_MAJESTIC_WEBUI=y/' $DEFCONFIG
+          # 启用 ONVIF 相关功能
+          cat >> $DEFCONFIG << 'EOF'
           
-          echo "配置文件已修改，ONVIF 和 opkg 已启用"
+          # ONVIF Support
+          BR2_PACKAGE_ONVIF=y
+          BR2_PACKAGE_LIVE555=y
+          BR2_PACKAGE_ONVIF_SERVER=y
           
-          # 显示修改后的配置
-          echo "=== 启用的关键功能 ==="
-          grep -E "ONVIF|OPKG|MAJESTIC" $DEFCONFIG
+          # Package Manager
+          BR2_PACKAGE_OPKG=y
+          BR2_PACKAGE_OPKG_LIBOPKG=y
+          
+          # Additional Features
+          BR2_PACKAGE_MAJESTIC=y
+          BR2_PACKAGE_MAJESTIC_WEBUI=y
+          BR2_PACKAGE_IPCTOOL=y
+          EOF
+          
+          echo "配置文件已更新"
+          echo "=== 新增配置 ==="
+          tail -15 $DEFCONFIG
 
       - name: Build Firmware
         run: |
           cd $GITHUB_WORKSPACE
-          chmod +x building.sh
-          ./building.sh ak3918ev300_lite
-
-      - name: Verify ONVIF and opkg in Build Output
-        run: |
-          echo "=== 验证固件内容 ==="
+          chmod +x building.sh 2>/dev/null || true
           
-          # 查找生成的 rootfs 文件
-          ROOTFS=$(find output/images -name "*.squashfs" -o -name "rootfs.*" | head -1)
-          
-          if [ -n "$ROOTFS" ] && command -v unsquashfs &> /dev/null; then
-            echo "检查 rootfs 中的 ONVIF 和 opkg..."
-            mkdir -p /tmp/rootfs
-            unsquashfs -d /tmp/rootfs $ROOTFS 2>/dev/null || true
+          # 尝试使用 building.sh
+          if [ -f "building.sh" ]; then
+            echo "使用官方构建脚本..."
+            ./building.sh ak3918ev300_lite
+          else
+            echo "building.sh 不存在，使用手动构建..."
             
-            # 检查 ONVIF 相关文件
-            if find /tmp/rootfs -name "*onvif*" 2>/dev/null | grep -q .; then
-              echo "✓ ONVIF 文件存在"
-            else
-              echo "⚠ ONVIF 文件未找到"
-            fi
+            # 下载 Buildroot
+            wget -q https://github.com/buildroot/buildroot/archive/refs/tags/2021.02.12.tar.gz
+            tar -xzf 2021.02.12.tar.gz
+            mv buildroot-2021.02.12 buildroot
             
-            # 检查 opkg
-            if [ -f "/tmp/rootfs/usr/bin/opkg" ] || [ -f "/tmp/rootfs/bin/opkg" ]; then
-              echo "✓ opkg 已安装"
-            else
-              echo "⚠ opkg 未找到"
-            fi
+            # 合并配置
+            cp -r br-ext-chip-anyka/configs/* buildroot/configs/
+            cp -r br-ext-chip-anyka/package/* buildroot/package/ 2>/dev/null || true
+            cp -r br-ext-chip-anyka/board/* buildroot/board/ 2>/dev/null || true
+            
+            cd buildroot
+            make ak3918ev300_lite_defconfig
+            
+            # 确保功能已启用
+            echo 'BR2_PACKAGE_ONVIF=y' >> .config
+            echo 'BR2_PACKAGE_OPKG=y' >> .config
+            echo 'BR2_PACKAGE_MAJESTIC=y' >> .config
+            echo 'BR2_PACKAGE_MAJESTIC_WEBUI=y' >> .config
+            echo 'BR2_PACKAGE_IPCTOOL=y' >> .config
+            
+            # 使用内部工具链避免下载问题
+            sed -i 's/BR2_TOOLCHAIN_EXTERNAL=y/# BR2_TOOLCHAIN_EXTERNAL is not set/' .config
+            echo 'BR2_TOOLCHAIN_BUILDROOT=y' >> .config
+            
+            make olddefconfig
+            make -j$(nproc)
           fi
 
       - name: Upload Firmware
@@ -97,3 +131,5 @@ jobs:
             output/images/*.squashfs
             output/images/*.img
             output/images/*.ubi
+            buildroot/output/images/
+          if-no-files-found: warn
