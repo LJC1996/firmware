@@ -22,26 +22,42 @@ jobs:
       - name: Download and Prepare Buildroot
         run: |
           cd $GITHUB_WORKSPACE
-          # 下载 Buildroot (尝试一个与 OpenIPC 项目更兼容的版本)
-          wget https://github.com/buildroot/buildroot/archive/refs/tags/2021.02.12.tar.gz
-          tar -xzf 2021.02.12.tar.gz
-          mv buildroot-2021.02.12 buildroot
+          # 使用更新的 Buildroot 版本（2023.02 或 2024.02）
+          wget https://github.com/buildroot/buildroot/archive/refs/tags/2024.02.tar.gz
+          tar -xzf 2024.02.tar.gz
+          mv buildroot-2024.02 buildroot
           echo "BUILDROOT_DIR=$GITHUB_WORKSPACE/buildroot" >> $GITHUB_ENV
 
       - name: Fix OpenIPC BR2_EXTERNAL Structure
         run: |
-          # 进入 br-ext-chip-anyka 目录
           cd $GITHUB_WORKSPACE/br-ext-chip-anyka
           
-          # 创建缺失的 external.desc 文件
-          # 文件内容格式: name <自定义名称>
-          echo "name OPENIPC_AK3918" > external.desc
+          # 正确的 external.desc 格式：只需要 "name <名称>" 一行
+          # 注意：不要有多余的空格或引号
+          echo "name openipc-ak3918" > external.desc
           
-          # 验证文件是否创建成功
-          echo "已创建 external.desc，内容如下："
+          # 验证内容
+          echo "=== external.desc 内容 ==="
           cat external.desc
+          echo "========================"
           
-          echo "br-ext-chip-anyka 目录现在包含:"
+          # 同时检查是否还有其他缺失的必要文件
+          echo "检查 Config.in 文件..."
+          if [ ! -f "Config.in" ]; then
+            echo "警告: 没有找到 Config.in，可能需要创建"
+            # 创建一个基本的 Config.in
+            echo "menu \"OpenIPC External Options\"" > Config.in
+            echo "source \"\$(BR2_EXTERNAL_OPENIPC_AK3918_PATH)/package/Config.in\"" >> Config.in
+            echo "endmenu" >> Config.in
+          fi
+          
+          echo "检查 package 目录..."
+          if [ ! -d "package" ]; then
+            echo "警告: 没有找到 package 目录"
+            mkdir -p package
+          fi
+          
+          echo "当前目录内容:"
           ls -la
 
       - name: Configure Buildroot
@@ -51,9 +67,10 @@ jobs:
           # 设置 BR2_EXTERNAL 并配置
           make BR2_EXTERNAL=$GITHUB_WORKSPACE/br-ext-chip-anyka ak3918ev300_lite_defconfig
           
-          # 检查配置是否成功
           if [ ! -f .config ]; then
             echo "配置失败！"
+            echo "尝试列出可用的 defconfig..."
+            make BR2_EXTERNAL=$GITHUB_WORKSPACE/br-ext-chip-anyka list-defconfigs
             exit 1
           fi
           
@@ -73,14 +90,20 @@ jobs:
       - name: Locate and Upload Firmware
         run: |
           echo "正在查找生成的固件文件..."
-          find $BUILDROOT_DIR/output/images -type f
-          ls -la $BUILDROOT_DIR/output/images/ || echo "未找到 images 目录"
+          if [ -d "$BUILDROOT_DIR/output/images" ]; then
+            ls -la $BUILDROOT_DIR/output/images/
+            echo "固件文件列表:"
+            find $BUILDROOT_DIR/output/images -type f \( -name "*.bin" -o -name "*.squashfs" -o -name "*.img" -o -name "*.ubi" \)
+          else
+            echo "未找到 output/images 目录"
+            # 尝试在其他位置查找
+            find $BUILDROOT_DIR -name "*.bin" -o -name "*.squashfs" | head -20
+          fi
         continue-on-error: true
 
       - uses: actions/upload-artifact@v4
         with:
           name: ak3918-openipc-firmware
           path: |
-            ${{ env.BUILDROOT_DIR }}/output/images/*.bin
-            ${{ env.BUILDROOT_DIR }}/output/images/*.squashfs
-            ${{ env.BUILDROOT_DIR }}/output/images/*.img
+            ${{ env.BUILDROOT_DIR }}/output/images/*
+            ${{ env.BUILDROOT_DIR }}/output/*.bin
