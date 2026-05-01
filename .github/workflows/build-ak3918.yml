@@ -1,0 +1,20 @@
+name: Build AK3918EV300 Firmware
+on:
+  workflow_dispatch:
+jobs:
+  build:
+    runs-on: ubuntu-20.04
+    steps:
+      - name: Checkout source code
+        uses: actions/checkout@v4
+      - name: Install dependencies
+        run: sudo apt update && sudo apt install -y build-essential libssl-dev
+      - name: Build firmware for AK3918EV300
+        run: |
+          make prepare
+          make BOARD=ak3918ev300
+      - name: Upload firmware artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ak3918ev300-firmware
+          path: output/images/*.bin
