@@ -1,4 +1,4 @@
-name: Build AK3918EV300 - Direct Method
+name: Build AK3918EV300 Full Featured Firmware
 
 on: workflow_dispatch
 
@@ -19,41 +19,44 @@ jobs:
           sudo apt update
           sudo apt install -y build-essential libncurses5-dev file bc cpio unzip rsync wget
 
-      - name: Download Buildroot
+      - name: Download Buildroot 2021.02.12
         run: |
           cd $GITHUB_WORKSPACE
           wget https://github.com/buildroot/buildroot/archive/refs/tags/2021.02.12.tar.gz
           tar -xzf 2021.02.12.tar.gz
           mv buildroot-2021.02.12 buildroot
 
-      - name: Merge OpenIPC into Buildroot
+      - name: Merge OpenIPC into Buildroot (Direct Method)
         run: |
           cd $GITHUB_WORKSPACE
-          
-          # 直接将 OpenIPC 的扩展合并到 Buildroot 中
           cp -r br-ext-chip-anyka/configs/* buildroot/configs/
           cp -r br-ext-chip-anyka/package/* buildroot/package/ 2>/dev/null || true
           cp -r br-ext-chip-anyka/board/* buildroot/board/ 2>/dev/null || true
-          
-          echo "已合并 OpenIPC 配置到 Buildroot"
+          echo "已合并 OpenIPC 配置"
 
-      - name: Configure and Build
+      - name: Configure and Build Full Firmware
         run: |
           cd $GITHUB_WORKSPACE/buildroot
           
-          # 使用标准 Buildroot 配置
+          # 使用标准 Buildroot 配置命令
           make ak3918ev300_lite_defconfig
           
-          # 添加额外包
+          # 关键：手动开启所有需要的功能，使其成为“完整版”
           echo 'BR2_PACKAGE_MAJESTIC=y' >> .config
           echo 'BR2_PACKAGE_MAJESTIC_WEBUI=y' >> .config
           echo 'BR2_PACKAGE_IPCTOOL=y' >> .config
+          echo 'BR2_PACKAGE_ONVIF=y' >> .config          # 尝试开启 ONVIF
+          echo 'BR2_PACKAGE_OPKG=y' >> .config           # 尝试开启 opkg
+          echo 'BR2_PACKAGE_OPENIPC_ULTIMATE=y' >> .config # 尝试开启所有 ultimate 包
           
+          # 修复依赖关系
           make olddefconfig
+          
+          # 开始编译
           make -j$(nproc)
 
       - uses: actions/upload-artifact@v4
         with:
-          name: ak3918-firmware
+          name: ak3918-full-firmware
           path: |
             ${{ github.workspace }}/buildroot/output/images/
